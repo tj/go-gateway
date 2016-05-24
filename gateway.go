@@ -21,12 +21,6 @@ type Responder interface {
 	Body() interface{}
 }
 
-// Method represents a callback service method.
-type Method struct {
-	reflect.Method
-	Input reflect.Type
-}
-
 // Context metadata.
 type Context struct {
 	AccountID                     string `json:"account_id"`
@@ -73,7 +67,7 @@ type Response struct {
 // Gateway wraps your service to expose its methods.
 type Gateway struct {
 	*Config
-	methods map[string]*Method
+	methods map[string]*reflect.Method
 }
 
 // Config for the gateway service.
@@ -93,7 +87,7 @@ func New(service interface{}) *Gateway {
 func NewConfig(config *Config) *Gateway {
 	g := &Gateway{
 		Config:  config,
-		methods: make(map[string]*Method),
+		methods: make(map[string]*reflect.Method),
 	}
 
 	g.init()
@@ -112,7 +106,6 @@ func (g *Gateway) init() {
 	service := reflect.TypeOf(g.Service)
 	for i := 0; i < service.NumMethod(); i++ {
 		method := service.Method(i)
-		mtype := method.Type
 
 		// Method must be exported.
 		if method.PkgPath != "" {
@@ -120,32 +113,12 @@ func (g *Gateway) init() {
 			continue
 		}
 
-		// Method needs two ins: *recv, *req
-		if mtype.NumIn() != 2 {
-			g.log("%q missing input pointer", method.Name)
-			continue
-		}
-
-		// Method needs two outs: *res, error
-		if mtype.NumOut() != 2 {
-			g.log("%q missing output interface or error", method.Name)
-			continue
-		}
-
-		if typ := mtype.Out(1); !typ.Implements(errType) {
-			g.log("%q second return value is not error", method.Name)
-			continue
-		}
-
-		g.methods[method.Name] = &Method{
-			Method: method,
-			Input:  mtype.In(1).Elem(),
-		}
+		g.methods[method.Name] = &method
 	}
 }
 
 // Methods returns the method names registered.
-func (g *Gateway) Methods() (v []*Method) {
+func (g *Gateway) Methods() (v []*reflect.Method) {
 	for _, m := range g.methods {
 		v = append(v, m)
 	}
@@ -153,7 +126,7 @@ func (g *Gateway) Methods() (v []*Method) {
 }
 
 // Lookup method by `name`.
-func (g *Gateway) Lookup(name string) *Method {
+func (g *Gateway) Lookup(name string) *reflect.Method {
 	cname := nameconv.UnderscoreToCamelcase(name, true)
 	return g.methods[cname]
 }
@@ -173,20 +146,30 @@ func (g *Gateway) Handle(event json.RawMessage, ctx *apex.Context) (interface{},
 		return &Response{http.StatusNotFound, "Not Found"}, nil
 	}
 
-	// parse input
-	in := reflect.New(method.Input)
-	if err := json.Unmarshal(req.Body, in.Interface()); err != nil {
-		return &Response{http.StatusBadRequest, "Malformed Request Body"}, nil
+	mtype := method.Type
+
+	var args = []reflect.Value{reflect.ValueOf(g.Service)}
+
+	// input
+	if mtype.NumIn() > 1 {
+		in := reflect.New(mtype.In(1).Elem())
+		args = append(args, in)
+		if err := json.Unmarshal(req.Body, in.Interface()); err != nil {
+			return &Response{http.StatusBadRequest, "Malformed Request Body"}, nil
+		}
 	}
 
-	// invoke the method
-	ret := method.Func.Call([]reflect.Value{
-		reflect.ValueOf(g.Service),
-		in,
-	})
+	// invoke
+	out := method.Func.Call(args)
 
-	// handle errors
-	if err, ok := ret[1].Interface().(error); ok {
+	// no output
+	if len(out) == 0 {
+		return &Response{200, nil}, nil
+	}
+
+	// one output: (error)
+	if len(out) == 1 {
+		err := out[0].Interface().(error)
 		if r, ok := err.(Responder); ok {
 			return &Response{r.Status(), r.Body()}, nil
 		}
@@ -194,10 +177,19 @@ func (g *Gateway) Handle(event json.RawMessage, ctx *apex.Context) (interface{},
 		return &Response{http.StatusInternalServerError, "Internal Server Error"}, nil
 	}
 
-	// handle response
-	if r, ok := ret[0].Interface().(Responder); ok {
+	// two outputs: (interface{}, error)
+	if err, ok := out[1].Interface().(error); ok && err != nil {
+		if r, ok := err.(Responder); ok {
+			return &Response{r.Status(), r.Body()}, nil
+		}
+
+		return &Response{http.StatusInternalServerError, "Internal Server Error"}, nil
+	}
+
+	// two outputs: (interface{}, error)
+	if r, ok := out[0].Interface().(Responder); ok {
 		return &Response{r.Status(), r.Body()}, nil
 	}
 
-	return &Response{200, ret[0].Interface()}, nil
+	return &Response{200, out[0].Interface()}, nil
 }

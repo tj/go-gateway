@@ -76,13 +76,18 @@ func (m *Math) Sub(in *AddInput) (int, error) {
 	return in.A - in.B, nil
 }
 
+func (m *Math) NoInput() (int, error) {
+	return 5, nil
+}
+
+// func (m *Math) NoInputNoOutput() error {
+// 	return nil
+// }
+
 func (m *Math) Error(in *AddInput) (int, error) {
 	return 0, errors.New("boom")
 }
 
-func (m *Math) MissingInterface(a, b int) error {
-	return nil
-}
 func (m *Math) notExported(a, b int) error {
 	return nil
 }
@@ -94,7 +99,7 @@ func TestNewConfig(t *testing.T) {
 	})
 
 	m := g.Methods()
-	assert.Len(t, m, 4)
+	assert.Len(t, m, 5, "incorrect number of methods")
 }
 
 func TestGateway_Lookup(t *testing.T) {
@@ -118,6 +123,14 @@ func TestGateway_Lookup(t *testing.T) {
 		method := g.Lookup("whoop")
 		assert.Nil(t, method, "should be missing")
 	}
+}
+
+func TestGateway_Handle_noInput(t *testing.T) {
+	g := New(&Math{})
+	e := event("no_input", `{}`)
+	v, err := g.Handle(e, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, &Response{200, 5}, v)
 }
 
 func TestGateway_Handle_lowercaseReturnInterface(t *testing.T) {
