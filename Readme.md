@@ -32,7 +32,7 @@ type AddInput struct {
 	B int `json:"b"`
 }
 
-func (m *Math) Add(in *AddInput) (interface{}, error) {
+func (m *Math) Add(in *AddInput) (int, error) {
 	return in.A + in.B, nil
 }
 
