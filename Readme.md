@@ -152,6 +152,7 @@ The request received by go-gateway looks something like the following:
 [![GoDoc](https://godoc.org/github.com/tj/go-gateway?status.svg)](https://godoc.org/github.com/tj/go-gateway)
 ![](https://img.shields.io/badge/license-MIT-blue.svg)
 ![](https://img.shields.io/badge/status-stable-green.svg)
+[![](http://apex.sh/images/badge.svg)](https://apex.sh/ping/)
 
 ---
 
